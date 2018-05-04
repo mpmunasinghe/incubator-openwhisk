@@ -44,7 +44,7 @@
   uri:
     url: "{{ db_protocol }}://{{ db_host }}:{{ db_port }}/{{ dbName }}"
     method: POST
-    status_code: 200, 201
+    status_code: 200, 201, 202
     body_format: json
     body: "{{ document }}"
     user: "{{ db_username }}"
