@@ -32,6 +32,7 @@ import whisk.core.ConfigKeys
 import whisk.core.database.test.{DbUtils, ExtendedCouchDbRestClient}
 import whisk.core.entity._
 import whisk.core.invoker.NamespaceBlacklist
+import whisk.utils.{retry => testRetry}
 
 import scala.concurrent.duration._
 
@@ -90,6 +91,11 @@ class NamespaceBlacklistTests
     }
   }
 
+  override protected def withFixture(test: NoArgTest) = {
+    assume(isCouchStore(authStore))
+    super.withFixture(test)
+  }
+
   override def beforeAll() = {
     val documents = identities.map { i =>
       (i.namespace.name + "/limits", i.limits.toJson.asJsObject)
@@ -123,7 +129,9 @@ class NamespaceBlacklistTests
   it should "mark a namespace as blocked if limit is 0 in database or if one of its subjects is blocked" in {
     val blacklist = new NamespaceBlacklist(authStore)
 
-    blacklist.refreshBlacklist().futureValue should have size blockedNamespacesCount
+    testRetry({
+      blacklist.refreshBlacklist().futureValue should have size blockedNamespacesCount
+    }, 60, Some(1.second))
 
     identities.map(blacklist.isBlacklisted) shouldBe Seq(true, true, false)
     authToIdentities(subject).toSeq.map(blacklist.isBlacklisted) shouldBe Seq(true, true)

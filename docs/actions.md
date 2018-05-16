@@ -1,3 +1,21 @@
+<!--
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+-->
 
 # Creating and invoking OpenWhisk actions
 
@@ -31,6 +49,7 @@ Learn how to create, invoke, and debug actions in your preferred development env
 In addition, learn about:
 
 * [Watching action output](#watching-action-output)
+* [Getting actions](#getting-actions)
 * [Listing actions](#listing-actions)
 * [Deleting actions](#deleting-actions)
 * [Accessing action metadata within the action body](#accessing-action-metadata-within-the-action-body)
@@ -142,42 +161,6 @@ Review the following steps and examples to create your first JavaScript action.
   activations
   44794bd6aab74415b4e42a308d880e5b         hello
   6bf1f670ee614a7eb5af3c9fde813043         hello
-  ```
-
-### Getting an action URL
-
-An action can be invoked through the REST interface via an HTTPS request. To get an action URL, execute the following command:
-
-```
-wsk action get actionName --url
-```
-```
-ok: got action actionName
-https://${APIHOST}/api/v1/namespaces/${NAMESPACE}/actions/actionName
-```
-
-**Note:** Authentication must be provided when invoking an action via an HTTPS request. For more information regarding
-action invocations using the REST interface, see
-[Using REST APIs with OpenWhisk](rest_api.md#actions).
-
-### Saving action code
-
-Code associated with an existing action is fetched and saved locally. Saving is performed on all actions except sequences and docker actions. When saving action code to a file, the code is saved in the current working directory, and the saved file path is displayed.
-
-1. Save action code to a filename that corresponds with an existing action name. A file extension that corresponds to the action kind is  used, or an extension of `.zip` will be used for action code that is a zip file.
-  ```
-  wsk action get actionName --save
-  ```
-  ```
-  ok: saved action code to /absolutePath/currentDirectory/actionName.js
-  ```
-
-2. Instead of allowing the CLI to determine the filename and extension  of the saved code, a custom filename and extension can be provided by using the `--save-as` flag.
-  ```
-  wsk action get actionName --save-as codeFile.js
-  ```
-  ```
-  ok: saved action code to /absolutePath/currentDirectory/codeFile.js
   ```
 
 ### Creating asynchronous actions
@@ -664,7 +647,7 @@ wsk action create helloPHP --kind php:7.1 helloPHP.zip
 
 ## Creating Swift actions
 
-The process of creating Swift actions is similar to that of JavaScript actions. The following sections guide you through creating and invoking a single swift action, and packaging an action in a zip file. 
+The process of creating Swift actions is similar to that of JavaScript actions. The following sections guide you through creating and invoking a single swift action, and packaging an action in a zip file.
 
 You can also use the online [Online Swift Playground](http://online.swiftplayground.run) to test your Swift code without having to install Xcode on your machine.
 
@@ -754,7 +737,7 @@ Find out more about parameters in the [Working with parameters](./parameters.md)
 
 When you create an OpenWhisk Swift action with a Swift source file, it has to be compiled into a binary before the action is run. Once done, subsequent calls to the action are much faster until the container holding your action is purged. This delay is known as the cold-start delay.
 
-To avoid the cold-start delay, you can compile your Swift file into a binary and then upload to OpenWhisk in a zip file. As you need the OpenWhisk scaffolding, the easiest way to create the binary is to build it within the same environment as it will be run in. 
+To avoid the cold-start delay, you can compile your Swift file into a binary and then upload to OpenWhisk in a zip file. As you need the OpenWhisk scaffolding, the easiest way to create the binary is to build it within the same environment as it will be run in.
 
 ### Using a script to build Swift packaged action
 You can use a script to automate the packaging of the action. Create  script `compile.sh`h file the following.
@@ -767,7 +750,7 @@ if [ -z "$1" ] ; then
     exit 1
 fi
 if [ -z "$2" ] ; then
-    echo 'Error: Missing runtime docker image name, for example openwhisk/action-swift-v4.0'
+    echo 'Error: Missing kind, for example swift:4.1'
     exit 2
 fi
 OUTPUT_DIR="build"
@@ -808,6 +791,12 @@ fi
 # Add in the OW specific bits
 cat $BASE_PATH/epilogue.swift >> $DEST_SOURCE/main.swift
 echo '_run_main(mainFunction:main)' >> $DEST_SOURCE/main.swift
+
+# Only for Swift4
+if [ ${2} != "swift:3.1.1" ]; then
+  echo 'Adding wait to deal with escaping'
+  echo '_ = _whisk_semaphore.wait(timeout: .distantFuture)' >> $DEST_SOURCE/main.swift
+fi
 
 echo \"Compiling $1...\"
 cd /$BASE_PATH/spm-build
@@ -922,7 +911,7 @@ func main(param: Input, completion: (Output?, Error?) -> Void) -> Void {
         throw VendingMachineError.insufficientFunds(coinsNeeded: 5)
     } catch {
         completion(nil, error)
-    } 
+    }
 }
 ```
 
@@ -1140,7 +1129,7 @@ import "os"
 func main() {
     //program receives one argument: the JSON object as a string
     arg := os.Args[1]
-   
+
     // unmarshal the string to a JSON object
     var obj map[string]interface{}
     json.Unmarshal([]byte(arg), &obj)
@@ -1219,6 +1208,79 @@ This command starts a polling loop that continuously checks for logs from activa
 
   Similarly, whenever you run the poll utility, you see in real time the logs for any actions running on your behalf in OpenWhisk.
 
+## Getting actions
+
+Metadata that describes existing actions can be retrieved via the `wsk action get` command.
+
+```
+wsk action get hello
+ok: got action hello
+{
+    "namespace": "user@email.com",
+    "name": "hello",
+    "version": "0.0.1",
+    "exec": {
+        "kind": "nodejs:6",
+        "binary": false
+    },
+    "annotations": [
+        {
+            "key": "exec",
+            "value": "nodejs:6"
+        }
+    ],
+    "limits": {
+        "timeout": 60000,
+        "memory": 256,
+        "logs": 10
+    },
+    "publish": false
+}
+```
+
+### Getting an action URL
+
+An action can be invoked through the REST interface via an HTTPS request. To get an action URL, execute the following command:
+
+```
+wsk action get actionName --url
+```
+
+A URL with the following format will be returned for standard actions:
+```
+ok: got action actionName
+https://${APIHOST}/api/v1/namespaces/${NAMESPACE}/actions/actionName
+```
+
+For [web actions](https://github.com/apache/incubator-openwhisk/blob/master/docs/webactions.md#web-actions), a URL will be returned in the the following format:
+```
+ok: got action actionName
+https://${APIHOST}/api/v1/web/${NAMESPACE}/${PACKAGE}/actionName
+```
+
+**Note:** For standard actions, authentication must be provided when invoking an action via an HTTPS request. For more information regarding
+action invocations using the REST interface, see
+[Using REST APIs with OpenWhisk](rest_api.md#actions).
+
+### Saving action code
+
+Code associated with an existing action may be retrieved and saved locally. Saving can be performed on all actions except sequences and docker actions.
+
+1. Save action code to a filename that corresponds with an existing action name in the current working directory. A file extension that corresponds to the action kind is used, or an extension of `.zip` will be used for action code that is a zip file.
+  ```
+  wsk action get actionName --save
+  ```
+  ```
+  ok: saved action code to /absolutePath/currentDirectory/actionName.js
+  ```
+
+2. Instead of allowing the CLI to determine the destination of the code to be saved, a custom file path, filename and extension can be provided by using the `--save-as` flag.
+  ```
+  wsk action get actionName --save-as codeFile.js
+  ```
+  ```
+  ok: saved action code to /absolutePath/currentDirectory/codeFile.js
+  ```
 
 ## Listing actions
 

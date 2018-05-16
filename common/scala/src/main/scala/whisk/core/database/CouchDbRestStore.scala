@@ -28,10 +28,9 @@ import akka.stream.scaladsl._
 import akka.util.ByteString
 import spray.json._
 import whisk.common.{Logging, LoggingMarkers, MetricEmitter, TransactionId}
+import whisk.core.database.StoreUtils._
 import whisk.core.entity.BulkEntityResult
 import whisk.core.entity.DocInfo
-import whisk.core.entity.DocRevision
-import whisk.core.entity.WhiskDocument
 import whisk.http.Messages
 import whisk.core.entity.DocumentReader
 
@@ -224,27 +223,7 @@ class CouchDbRestStore[DocumentAbstraction <: DocumentSerializer](dbProtocol: St
       e match {
         case Right(response) =>
           transid.finished(this, start, s"[GET] '$dbName' completed: found document '$doc'")
-
-          val asFormat = try {
-            docReader.read(ma, response)
-          } catch {
-            case e: Exception => jsonFormat.read(response)
-          }
-
-          if (asFormat.getClass != ma.runtimeClass) {
-            throw DocumentTypeMismatchException(
-              s"document type ${asFormat.getClass} did not match expected type ${ma.runtimeClass}.")
-          }
-
-          val deserialized = asFormat.asInstanceOf[A]
-
-          val responseRev = response.fields("_rev").convertTo[String]
-          assert(doc.rev.rev == null || doc.rev.rev == responseRev, "Returned revision should match original argument")
-          // FIXME remove mutability from appropriate classes now that it is no longer required by GSON.
-          deserialized.asInstanceOf[WhiskDocument].revision(DocRevision(responseRev))
-
-          deserialized
-
+          deserialize[A, DocumentAbstraction](doc, response)
         case Left(StatusCodes.NotFound) =>
           transid.finished(this, start, s"[GET] '$dbName', document: '${doc}'; not found.")
           // for compatibility
@@ -279,6 +258,8 @@ class CouchDbRestStore[DocumentAbstraction <: DocumentSerializer](dbProtocol: St
                                      stale: StaleParameter)(implicit transid: TransactionId): Future[List[JsObject]] = {
 
     require(!(reduce && includeDocs), "reduce and includeDocs cannot both be true")
+    require(skip >= 0, "skip should be non negative")
+    require(limit >= 0, "limit should be non negative")
 
     // Apparently you have to do that in addition to setting "descending"
     val (realStartKey, realEndKey) = if (descending) {
@@ -330,25 +311,22 @@ class CouchDbRestStore[DocumentAbstraction <: DocumentSerializer](dbProtocol: St
 
   protected[core] def count(table: String, startKey: List[Any], endKey: List[Any], skip: Int, stale: StaleParameter)(
     implicit transid: TransactionId): Future[Long] = {
+    require(skip >= 0, "skip should be non negative")
 
     val Array(firstPart, secondPart) = table.split("/")
 
     val start = transid.started(this, LoggingMarkers.DATABASE_QUERY, s"[COUNT] '$dbName' searching '$table")
 
     val f = client
-      .executeView(firstPart, secondPart)(
-        startKey = startKey,
-        endKey = endKey,
-        skip = Some(skip),
-        stale = stale,
-        reduce = true)
+      .executeView(firstPart, secondPart)(startKey = startKey, endKey = endKey, stale = stale, reduce = true)
       .map {
         case Right(response) =>
           val rows = response.fields("rows").convertTo[List[JsObject]]
 
-          val out = if (!rows.isEmpty) {
+          val out = if (rows.nonEmpty) {
             assert(rows.length == 1, s"result of reduced view contains more than one value: '$rows'")
-            rows.head.fields("value").convertTo[Long]
+            val count = rows.head.fields("value").convertTo[Long]
+            if (count > skip) count - skip else 0L
           } else 0L
 
           transid.finished(this, start, s"[COUNT] '$dbName' completed: count $out")

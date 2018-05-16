@@ -72,12 +72,12 @@ class SchemaTests extends FlatSpec with BeforeAndAfter with ExecHelpers with Mat
   behavior of "TransactionId"
 
   it should "serdes a transaction id without extraLogging parameter" in {
-    val txIdWithoutParameter = TransactionId(4711)
+    val txIdWithoutParameter = TransactionId("4711")
 
     // test serialization
     val serializedTxIdWithoutParameter = TransactionId.serdes.write(txIdWithoutParameter)
     serializedTxIdWithoutParameter match {
-      case JsArray(Vector(JsNumber(id), JsNumber(_))) =>
+      case JsArray(Vector(JsString(id), JsNumber(_))) =>
         assert(id == txIdWithoutParameter.meta.id)
       case _ => withClue(serializedTxIdWithoutParameter) { assert(false) }
     }
@@ -89,12 +89,12 @@ class SchemaTests extends FlatSpec with BeforeAndAfter with ExecHelpers with Mat
   }
 
   it should "serdes a transaction id with extraLogging parameter" in {
-    val txIdWithParameter = TransactionId(4711, true)
+    val txIdWithParameter = TransactionId("4711", true)
 
     // test serialization
     val serializedTxIdWithParameter = TransactionId.serdes.write(txIdWithParameter)
     serializedTxIdWithParameter match {
-      case JsArray(Vector(JsNumber(id), JsNumber(_), JsBoolean(extraLogging))) =>
+      case JsArray(Vector(JsString(id), JsNumber(_), JsBoolean(extraLogging))) =>
         assert(id == txIdWithParameter.meta.id)
         assert(extraLogging)
       case _ => withClue(serializedTxIdWithParameter) { assert(false) }
@@ -235,14 +235,15 @@ class SchemaTests extends FlatSpec with BeforeAndAfter with ExecHelpers with Mat
     val paths = Seq(
       "a",
       "a b",
-      "a@b.c",
+      "a@b.c&d",
+      "a@&b",
       "_a",
       "_",
       "_ _",
       "a0",
       "a 0",
       "a.0",
-      "a@@",
+      "a@@&",
       "0",
       "0.0",
       "0.0.0",
@@ -265,9 +266,17 @@ class SchemaTests extends FlatSpec with BeforeAndAfter with ExecHelpers with Mat
       " /",
       "/ ",
       "0 ",
+      "a=2b",
       "_ ",
+      "a?b",
+      "x#x",
+      "a§b",
       "a  ",
+      "a()b",
+      "a{}b",
       "a \t",
+      "-abc",
+      "&abc",
       "a\n",
       "a" * (EntityName.ENTITY_NAME_MAX_LENGTH + 1))
     paths.foreach { p =>
@@ -672,11 +681,11 @@ class SchemaTests extends FlatSpec with BeforeAndAfter with ExecHelpers with Mat
       JsObject(
         "timeout" -> TimeLimit.STD_DURATION.toMillis.toInt.toJson,
         "memory" -> MemoryLimit.stdMemory.toMB.toInt.toJson,
-        "logs" -> LogLimit.STD_LOGSIZE.toMB.toInt.toJson),
+        "logs" -> LogLimit.stdLogSize.toMB.toInt.toJson),
       JsObject(
         "timeout" -> TimeLimit.STD_DURATION.toMillis.toInt.toJson,
         "memory" -> MemoryLimit.stdMemory.toMB.toInt.toJson,
-        "logs" -> LogLimit.STD_LOGSIZE.toMB.toInt.toJson,
+        "logs" -> LogLimit.stdLogSize.toMB.toInt.toJson,
         "foo" -> "bar".toJson),
       JsObject(
         "timeout" -> TimeLimit.STD_DURATION.toMillis.toInt.toJson,
@@ -697,7 +706,7 @@ class SchemaTests extends FlatSpec with BeforeAndAfter with ExecHelpers with Mat
       JsNull,
       JsObject("timeout" -> TimeLimit.STD_DURATION.toMillis.toInt.toJson),
       JsObject("memory" -> MemoryLimit.stdMemory.toMB.toInt.toJson),
-      JsObject("logs" -> (LogLimit.STD_LOGSIZE.toMB.toInt + 1).toJson),
+      JsObject("logs" -> (LogLimit.stdLogSize.toMB.toInt + 1).toJson),
       JsObject(
         "TIMEOUT" -> TimeLimit.STD_DURATION.toMillis.toInt.toJson,
         "MEMORY" -> MemoryLimit.stdMemory.toMB.toInt.toJson),
@@ -749,7 +758,7 @@ class SchemaTests extends FlatSpec with BeforeAndAfter with ExecHelpers with Mat
     an[IllegalArgumentException] should be thrownBy ActionLimits(
       TimeLimit(),
       MemoryLimit(),
-      LogLimit(LogLimit.MIN_LOGSIZE - 1.B))
+      LogLimit(LogLimit.minLogSize - 1.B))
 
     an[IllegalArgumentException] should be thrownBy ActionLimits(
       TimeLimit(TimeLimit.MAX_DURATION + 1.millisecond),
@@ -762,7 +771,7 @@ class SchemaTests extends FlatSpec with BeforeAndAfter with ExecHelpers with Mat
     an[IllegalArgumentException] should be thrownBy ActionLimits(
       TimeLimit(),
       MemoryLimit(),
-      LogLimit(LogLimit.MAX_LOGSIZE + 1.B))
+      LogLimit(LogLimit.maxLogSize + 1.B))
   }
 
   it should "parse activation id as uuid" in {

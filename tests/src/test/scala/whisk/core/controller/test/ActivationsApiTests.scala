@@ -22,20 +22,15 @@ import java.time.{Clock, Instant}
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.scaladsl.model.StatusCodes._
 import akka.http.scaladsl.server.Route
-import akka.stream.ActorMaterializer
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 import spray.json.DefaultJsonProtocol._
 import spray.json._
 import whisk.core.controller.WhiskActivationsApi
-import whisk.core.database.ArtifactStoreProvider
 import whisk.core.entitlement.Collection
 import whisk.core.entity._
 import whisk.core.entity.size._
 import whisk.http.{ErrorResponse, Messages}
-import whisk.spi.SpiLoader
-
-import scala.reflect.classTag
 
 /**
  * Tests Activations API.
@@ -390,13 +385,46 @@ class ActivationsApiTests extends ControllerTestCommon with WhiskActivationsApi 
     }
   }
 
-  it should "reject activation list when limit is greater than maximum allowed value" in {
+  it should "reject list when limit is greater than maximum allowed value" in {
     implicit val tid = transid()
     val exceededMaxLimit = Collection.MAX_LIST_LIMIT + 1
     val response = Get(s"$collectionPath?limit=$exceededMaxLimit") ~> Route.seal(routes(creds)) ~> check {
       status should be(BadRequest)
       responseAs[String] should include {
         Messages.listLimitOutOfRange(Collection.ACTIVATIONS, exceededMaxLimit, Collection.MAX_LIST_LIMIT)
+      }
+    }
+  }
+
+  it should "reject list when limit is not an integer" in {
+    implicit val tid = transid()
+    val notAnInteger = "string"
+    val response = Get(s"$collectionPath?limit=$notAnInteger") ~> Route.seal(routes(creds)) ~> check {
+      status should be(BadRequest)
+      responseAs[String] should include {
+        Messages.argumentNotInteger(Collection.ACTIVATIONS, notAnInteger)
+      }
+    }
+  }
+
+  it should "reject list when skip is negative" in {
+    implicit val tid = transid()
+    val negativeSkip = -1
+    val response = Get(s"$collectionPath?skip=$negativeSkip") ~> Route.seal(routes(creds)) ~> check {
+      status should be(BadRequest)
+      responseAs[String] should include {
+        Messages.listSkipOutOfRange(Collection.ACTIVATIONS, negativeSkip)
+      }
+    }
+  }
+
+  it should "reject list when skip is not an integer" in {
+    implicit val tid = transid()
+    val notAnInteger = "string"
+    val response = Get(s"$collectionPath?skip=$notAnInteger") ~> Route.seal(routes(creds)) ~> check {
+      status should be(BadRequest)
+      responseAs[String] should include {
+        Messages.argumentNotInteger(Collection.ACTIVATIONS, notAnInteger)
       }
     }
   }
@@ -553,16 +581,6 @@ class ActivationsApiTests extends ControllerTestCommon with WhiskActivationsApi 
   }
 
   it should "report proper error when record is corrupted on get" in {
-    implicit val materializer = ActorMaterializer()
-    val activationStore = SpiLoader
-      .get[ArtifactStoreProvider]
-      .makeStore[WhiskActivation]()(
-        classTag[WhiskActivation],
-        WhiskActivation.serdes,
-        WhiskDocumentReader,
-        system,
-        logging,
-        materializer)
     implicit val tid = transid()
 
     //A bad activation type which breaks the deserialization by removing the subject entry
