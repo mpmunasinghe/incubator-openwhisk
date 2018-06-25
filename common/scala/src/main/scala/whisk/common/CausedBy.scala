@@ -15,5 +15,21 @@
  * limitations under the License.
  */
 
-ext.dockerImageName = 'example'
-apply from: '../../gradle/docker.gradle'
+package whisk.common
+
+/**
+ * Helper to match on exceptions caused by other exceptions.
+ *
+ * Use this like:
+ *
+ * ```
+ * try {
+ *   block()
+ * } catch {
+ *   case CausedBy(internalException: MyFancyException) => ...
+ * }
+ * ```
+ */
+object CausedBy {
+  def unapply(e: Throwable): Option[Throwable] = Option(e.getCause)
+}

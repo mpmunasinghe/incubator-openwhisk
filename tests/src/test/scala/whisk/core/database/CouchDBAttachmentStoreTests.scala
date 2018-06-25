@@ -15,5 +15,18 @@
  * limitations under the License.
  */
 
-ext.dockerImageName = 'java8action'
-apply from: '../../gradle/docker.gradle'
+package whisk.core.database
+
+import org.junit.runner.RunWith
+import org.scalatest.FlatSpec
+import org.scalatest.junit.JUnitRunner
+import whisk.core.database.memory.MemoryAttachmentStoreProvider
+import whisk.core.database.test.behavior.ArtifactStoreAttachmentBehaviors
+
+import scala.reflect.ClassTag
+
+@RunWith(classOf[JUnitRunner])
+class CouchDBAttachmentStoreTests extends FlatSpec with CouchDBStoreBehaviorBase with ArtifactStoreAttachmentBehaviors {
+  override protected def getAttachmentStore[D <: DocumentSerializer: ClassTag]() =
+    Some(MemoryAttachmentStoreProvider.makeStore[D]())
+}

@@ -28,7 +28,6 @@ import akka.http.scaladsl.model.StatusCodes.TooManyRequests
 import whisk.core.entitlement.Privilege.ACTIVATE
 import whisk.core.entitlement.Privilege.REJECT
 import whisk.common.{Logging, TransactionId, UserEvents}
-import whisk.connector.kafka.KafkaMessagingProvider
 import whisk.core.WhiskConfig
 import whisk.core.connector.{EventMessage, Metric}
 import whisk.core.controller.RejectRequest
@@ -37,6 +36,8 @@ import whisk.core.loadBalancer.{LoadBalancer, ShardingContainerPoolBalancer}
 import whisk.http.ErrorResponse
 import whisk.http.Messages
 import whisk.http.Messages._
+import whisk.core.connector.MessagingProvider
+import whisk.spi.SpiLoader
 
 package object types {
   type Entitlements = TrieMap[(Subject, String), Set[Privilege]]
@@ -143,7 +144,8 @@ protected[core] abstract class EntitlementProvider(
       activationThrottleCalculator(config.actionInvokeConcurrentLimit.toInt, _.limits.concurrentInvocations),
       config.actionInvokeSystemOverloadLimit.toInt)
 
-  private val eventProducer = KafkaMessagingProvider.getProducer(this.config)
+  private val messagingProvider = SpiLoader.get[MessagingProvider]
+  private val eventProducer = messagingProvider.getProducer(this.config)
 
   /**
    * Grants a subject the right to access a resources.
@@ -287,7 +289,7 @@ protected[core] abstract class EntitlementProvider(
   protected def checkPrivilege(user: Identity, right: Privilege, resources: Set[Resource])(
     implicit transid: TransactionId): Future[Set[(Resource, Boolean)]] = {
     // check the default namespace first, bypassing additional checks if permitted
-    val defaultNamespaces = Set(user.namespace.asString)
+    val defaultNamespaces = Set(user.namespace.name.asString)
     implicit val es: EntitlementProvider = this
 
     Future.sequence {
@@ -361,7 +363,7 @@ protected[core] abstract class EntitlementProvider(
   private def checkThrottleOverload(throttle: Future[RateLimit], user: Identity)(
     implicit transid: TransactionId): Future[Unit] = {
     throttle.flatMap { limit =>
-      val userId = user.authkey.uuid
+      val userId = user.namespace.uuid
       if (limit.ok) {
         limit match {
           case c: ConcurrentRateLimit => {
@@ -373,7 +375,7 @@ protected[core] abstract class EntitlementProvider(
                 s"controller${controllerInstance.instance}",
                 metric,
                 user.subject,
-                user.namespace.toString,
+                user.namespace.name.toString,
                 userId,
                 metric.typeName))
           }
@@ -381,7 +383,7 @@ protected[core] abstract class EntitlementProvider(
         }
         Future.successful(())
       } else {
-        logging.info(this, s"'${user.namespace}' has exceeded its throttle limit, ${limit.errorMsg}")
+        logging.info(this, s"'${user.namespace.name}' has exceeded its throttle limit, ${limit.errorMsg}")
         val metric = Metric(limit.limitName, 1)
         UserEvents.send(
           eventProducer,
@@ -389,7 +391,7 @@ protected[core] abstract class EntitlementProvider(
             s"controller${controllerInstance.instance}",
             metric,
             user.subject,
-            user.namespace.toString,
+            user.namespace.name.toString,
             userId,
             metric.typeName))
         Future.failed(RejectRequest(TooManyRequests, limit.errorMsg))

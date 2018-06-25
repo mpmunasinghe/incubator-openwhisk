@@ -15,17 +15,5 @@
  * limitations under the License.
  */
 
-package actionContainers
-
-import org.junit.runner.RunWith
-import org.scalatest.junit.JUnitRunner
-import common.WskActorSystem
-
-@RunWith(classOf[JUnitRunner])
-class Python2ActionContainerTests extends PythonActionContainerTests with WskActorSystem {
-
-  override lazy val imageName = "python2action"
-
-  /** indicates if strings in python are unicode by default (i.e., python3 -> true, python2.7 -> false) */
-  override lazy val pythonStringAsUnicode = false
-}
+ext.dockerImageName = 'actionproxy'
+apply from: '../../gradle/docker.gradle'

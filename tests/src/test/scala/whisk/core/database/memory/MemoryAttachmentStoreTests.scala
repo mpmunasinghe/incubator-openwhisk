@@ -15,7 +15,26 @@
  * limitations under the License.
  */
 
-ext.dockerImageName = 'badproxy'
+package whisk.core.database.memory
 
-apply from: '../../../../gradle/docker.gradle'
-distDocker.dependsOn ':actionRuntimes:actionProxy:distDocker'
+import common.WskActorSystem
+import org.junit.runner.RunWith
+import org.scalatest.FlatSpec
+import org.scalatest.junit.JUnitRunner
+import whisk.core.database.AttachmentStore
+import whisk.core.database.test.AttachmentStoreBehaviors
+import whisk.core.entity.WhiskEntity
+
+@RunWith(classOf[JUnitRunner])
+class MemoryAttachmentStoreTests extends FlatSpec with AttachmentStoreBehaviors with WskActorSystem {
+
+  override val store: AttachmentStore = MemoryAttachmentStoreProvider.makeStore[WhiskEntity]()
+
+  override def storeType: String = "Memory"
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    val count = store.asInstanceOf[MemoryAttachmentStore].attachmentCount
+    require(count == 0, s"AttachmentStore not empty after all runs - $count")
+  }
+}
