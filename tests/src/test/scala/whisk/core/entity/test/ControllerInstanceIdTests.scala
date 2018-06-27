@@ -15,33 +15,32 @@
  * limitations under the License.
  */
 
-include 'common:scala'
+package whisk.core.entity.test
 
-include 'core:controller'
-include 'core:invoker'
+import org.junit.runner.RunWith
+import org.scalatest.FlatSpec
+import org.scalatest.Matchers
+import org.scalatest.junit.JUnitRunner
+import whisk.core.entity.ControllerInstanceId
 
-include 'tests'
-include 'tests:performance:gatling_tests'
+@RunWith(classOf[JUnitRunner])
+class ControllerInstanceIdTests extends FlatSpec with Matchers {
 
-include 'tools:actionProxy'
+  behavior of "ControllerInstanceId"
 
-include 'tools:admin'
+  it should "accept usable characters" in {
+    Seq("a", "1", "a.1", "a_1").foreach { s =>
+      ControllerInstanceId(s).asString shouldBe s
 
-rootProject.name = 'openwhisk'
+    }
+  }
 
-gradle.ext.scala = [
-    version: '2.11.11',
-    compileFlags: ['-feature', '-unchecked', '-deprecation', '-Xfatal-warnings', '-Ywarn-unused-import']
-]
+  it should "reject unusable characters" in {
+    Seq(" ", "!", "$", "a" * 129).foreach { s =>
+      an[IllegalArgumentException] shouldBe thrownBy {
+        ControllerInstanceId(s)
+      }
+    }
+  }
 
-gradle.ext.scalafmt = [
-    version: '1.5.0',
-    config: new File(rootProject.projectDir, '.scalafmt.conf')
-]
-
-gradle.ext.scoverage = [
-    deps: [
-        'org.scoverage:scalac-scoverage-plugin_2.11:1.3.1',
-        'org.scoverage:scalac-scoverage-runtime_2.11:1.3.1'
-    ]
-]
+}
