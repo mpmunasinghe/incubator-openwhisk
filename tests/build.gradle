@@ -28,6 +28,8 @@ repositories {
     mavenCentral()
 }
 
+install.dependsOn ':tools:admin:install'
+
 project.archivesBaseName = "openwhisk-tests"
 
 tasks.withType(Test) {
@@ -143,11 +145,14 @@ dependencies {
     compile 'com.typesafe.akka:akka-http-testkit_2.11:10.1.1'
     compile 'com.github.java-json-tools:json-schema-validator:2.2.8'
     compile "org.mockito:mockito-core:2.15.0"
+    compile 'io.opentracing:opentracing-mock:0.31.0'
 
     compile project(':common:scala')
     compile project(':core:controller')
     compile project(':core:invoker')
     compile project(':tools:admin')
+
+
 
     scoverage gradle.scoverage.deps
 }
@@ -234,7 +239,8 @@ def getScoverageClasspath(Project project) {
         ':tools:admin'
     ]
     def combinedClasspath = projectNames.inject(project.files([])) { result, name ->
-        result + project.project(name).sourceSets.scoverage.runtimeClasspath
+        def cp = project.project(name).sourceSets.scoverage.runtimeClasspath
+        result + cp.filter {it.name.contains('scoverage')}
     }
 
     combinedClasspath + sourceSets.test.runtimeClasspath

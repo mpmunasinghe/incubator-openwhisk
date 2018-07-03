@@ -28,17 +28,7 @@ import whisk.common.{Logging, TransactionId}
 import whisk.core.cli.{CommandError, CommandMessages, IllegalState, WhiskCommand}
 import whisk.core.database.UserCommand.ExtendedAuth
 import whisk.core.entity.types._
-import whisk.core.entity.{
-  AuthKey,
-  DocInfo,
-  EntityName,
-  Identity,
-  Namespace,
-  Subject,
-  WhiskAuth,
-  WhiskDocumentReader,
-  WhiskNamespace
-}
+import whisk.core.entity._
 import whisk.http.Messages
 import whisk.spi.SpiLoader
 
@@ -85,9 +75,8 @@ class UserCommand extends Subcommand("user") with WhiskCommand {
 
     def isUUID(u: String) = Try(UUID.fromString(u)).isSuccess
 
-    def desiredNamespace = Namespace(EntityName(namespace.getOrElse(subject()).trim), authKey.uuid)
-
-    def authKey: AuthKey = auth.map(AuthKey(_)).getOrElse(AuthKey())
+    def desiredNamespace(authKey: BasicAuthenticationAuthKey) =
+      Namespace(EntityName(namespace.getOrElse(subject()).trim), authKey.uuid)
   }
 
   val create = new CreateUserCmd
@@ -171,22 +160,26 @@ class UserCommand extends Subcommand("user") with WhiskCommand {
 
   def createUser(authStore: AuthStore)(implicit transid: TransactionId,
                                        ec: ExecutionContext): Future[Either[CommandError, String]] = {
-    authStore.get[ExtendedAuth](DocInfo(create.subject())).flatMap { auth =>
-      if (auth.isBlocked) {
-        Future.successful(Left(IllegalState(CommandMessages.subjectBlocked)))
-      } else if (auth.namespaces.exists(_.namespace.name == create.desiredNamespace.name)) {
-        Future.successful(Left(IllegalState(CommandMessages.namespaceExists)))
-      } else {
-        val newNS = auth.namespaces + WhiskNamespace(create.desiredNamespace, create.authKey)
-        val newAuth = WhiskAuth(auth.subject, newNS).revision[WhiskAuth](auth.rev)
-        authStore.put(newAuth).map(_ => Right(create.authKey.compact))
+    val authKey = create.auth.map(BasicAuthenticationAuthKey(_)).getOrElse(BasicAuthenticationAuthKey())
+    authStore
+      .get[ExtendedAuth](DocInfo(create.subject()))
+      .flatMap { auth =>
+        if (auth.isBlocked) {
+          Future.successful(Left(IllegalState(CommandMessages.subjectBlocked)))
+        } else if (auth.namespaces.exists(_.namespace.name == create.desiredNamespace(authKey).name)) {
+          Future.successful(Left(IllegalState(CommandMessages.namespaceExists)))
+        } else {
+          val newNS = auth.namespaces + WhiskNamespace(create.desiredNamespace(authKey), authKey)
+          val newAuth = WhiskAuth(auth.subject, newNS).revision[WhiskAuth](auth.rev)
+          authStore.put(newAuth).map(_ => Right(authKey.compact))
+        }
       }
-    }
-  }.recoverWith {
-    case _: NoDocumentException =>
-      val auth =
-        WhiskAuth(Subject(create.subject()), Set(WhiskNamespace(create.desiredNamespace, create.authKey)))
-      authStore.put(auth).map(_ => Right(create.authKey.compact))
+      .recoverWith {
+        case _: NoDocumentException =>
+          val auth =
+            WhiskAuth(Subject(create.subject()), Set(WhiskNamespace(create.desiredNamespace(authKey), authKey)))
+          authStore.put(auth).map(_ => Right(authKey.compact))
+      }
   }
 
   def deleteUser(authStore: AuthStore)(implicit transid: TransactionId,
@@ -240,7 +233,7 @@ class UserCommand extends Subcommand("user") with WhiskCommand {
   def whoIs(authStore: AuthStore)(implicit transid: TransactionId,
                                   ec: ExecutionContext): Future[Either[CommandError, String]] = {
     Identity
-      .get(authStore, AuthKey(whois.authkey()))
+      .get(authStore, BasicAuthenticationAuthKey(whois.authkey()))
       .map { i =>
         val msg = Seq(s"subject: ${i.subject}", s"namespace: ${i.namespace}").mkString(Properties.lineSeparator)
         Right(msg)
