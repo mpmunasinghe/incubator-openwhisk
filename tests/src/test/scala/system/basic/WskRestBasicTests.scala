@@ -22,29 +22,24 @@ import akka.http.scaladsl.model.StatusCodes.BadGateway
 import akka.http.scaladsl.model.StatusCodes.Conflict
 import akka.http.scaladsl.model.StatusCodes.Unauthorized
 import akka.http.scaladsl.model.StatusCodes.NotFound
-
 import java.time.Instant
 
 import scala.concurrent.duration.DurationInt
-
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
-
-import common.TestHelpers
-import common.TestUtils
-import common.rest.WskRest
+import common._
+import common.rest.WskRestOperations
 import common.rest.RestResult
-import common.WskProps
-import common.WskTestHelpers
 import spray.json._
 import spray.json.DefaultJsonProtocol._
 import whisk.http.Messages
 
 @RunWith(classOf[JUnitRunner])
-class WskRestBasicTests extends TestHelpers with WskTestHelpers {
+class WskRestBasicTests extends TestHelpers with WskTestHelpers with WskActorSystem {
 
-  implicit val wskprops: common.WskProps = WskProps()
-  val wsk: common.rest.WskRest = new WskRest
+  implicit val wskprops = WskProps()
+  val wsk = new WskRestOperations
+
   val defaultAction: Some[String] = Some(TestUtils.getTestActionFilename("hello.js"))
 
   /**
@@ -175,7 +170,7 @@ class WskRestBasicTests extends TestHelpers with WskTestHelpers {
       result.getField("name") shouldBe name
       result.getField("version") shouldBe "0.0.1"
       result.getFieldJsValue("publish") shouldBe JsBoolean(false)
-      result.getFieldJsValue("binding") shouldBe JsObject()
+      result.getFieldJsValue("binding") shouldBe JsObject.empty
       result.getField("invalid") shouldBe ""
   }
 
@@ -471,7 +466,7 @@ class WskRestBasicTests extends TestHelpers with WskTestHelpers {
       }
 
       val result = wsk.action.invoke(name, blocking = true, result = true)
-      result.stdout.parseJson.asJsObject shouldBe JsObject()
+      result.stdout.parseJson.asJsObject shouldBe JsObject.empty
   }
 
   it should "create, and invoke an action that times out to ensure the proper response is received" in withAssetCleaner(
@@ -561,7 +556,7 @@ class WskRestBasicTests extends TestHelpers with WskTestHelpers {
 
     val runWithNoParams = wsk.trigger.fire(triggerName, Map())
     withActivation(wsk.activation, runWithNoParams) { activation =>
-      activation.response.result shouldBe Some(JsObject())
+      activation.response.result shouldBe Some(JsObject.empty)
       activation.duration shouldBe 0L // shouldn't exist but CLI generates it
       activation.end shouldBe Instant.EPOCH // shouldn't exist but CLI generates it
     }
@@ -656,7 +651,7 @@ class WskRestBasicTests extends TestHelpers with WskTestHelpers {
       result.getFieldJsValue("annotations").toString shouldBe "[]"
       result.getFieldJsValue("parameters") shouldBe JsArray(
         JsObject("key" -> JsString("payload"), "value" -> JsString("test")))
-      result.getFieldJsValue("limits") shouldBe JsObject()
+      result.getFieldJsValue("limits") shouldBe JsObject.empty
       result.getField("invalid") shouldBe ""
   }
 
@@ -679,7 +674,7 @@ class WskRestBasicTests extends TestHelpers with WskTestHelpers {
 
     val run = wsk.trigger.fire(triggerName)
     withActivation(wsk.activation, run) { activation =>
-      activation.response.result shouldBe Some(JsObject())
+      activation.response.result shouldBe Some(JsObject.empty)
     }
   }
 
@@ -1034,9 +1029,9 @@ class WskRestBasicTests extends TestHelpers with WskTestHelpers {
       result.getFieldJsValue("publish") shouldBe JsBoolean(false)
       result.getField("subject") shouldBe ns
       result.getField("activationId") shouldBe activation.activationId
-      result.getFieldJsValue("start").toString should not be JsObject().toString
-      result.getFieldJsValue("end").toString shouldBe JsObject().toString
-      result.getFieldJsValue("duration").toString shouldBe JsObject().toString
+      result.getFieldJsValue("start").toString should not be JsObject.empty.toString
+      result.getFieldJsValue("end").toString shouldBe JsObject.empty.toString
+      result.getFieldJsValue("duration").toString shouldBe JsObject.empty.toString
       result.getFieldListJsObject("annotations").length shouldBe 0
     }
   }

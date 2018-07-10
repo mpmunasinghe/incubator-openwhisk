@@ -23,14 +23,13 @@ import java.io.FileWriter
 import java.time.Instant
 
 import scala.concurrent.duration.DurationInt
-import scala.collection.mutable.Buffer
 import scala.concurrent.duration.Duration
 import scala.language.postfixOps
-import org.scalatest.Matchers
-
 import TestUtils._
 import spray.json._
 import whisk.core.entity.ByteSize
+
+import scala.util.Try
 
 case class WskProps(
   authKey: String = WhiskProperties.readAuthKey(WhiskProperties.getAuthFileForTesting),
@@ -88,50 +87,90 @@ trait WaitFor {
   }
 }
 
-trait BaseWsk extends BaseRunWsk {
-  val action: BaseAction
-  val trigger: BaseTrigger
-  val rule: BaseRule
-  val activation: BaseActivation
-  val pkg: BasePackage
-  val namespace: BaseNamespace
-  val api: BaseApi
-}
-
-trait FullyQualifiedNames {
+trait HasActivation {
 
   /**
-   * Fully qualifies the name of an entity with its namespace.
-   * If the name already starts with the PATHSEP character, then
-   * it already is fully qualified. Otherwise (package name or
-   * basic entity name) it is prefixed with the namespace. The
-   * namespace is derived from the implicit whisk properties.
-   *
-   * @param name to fully qualify iff it is not already fully qualified
-   * @param wp whisk properties
-   * @return name if it is fully qualified else a name fully qualified for a namespace
+   * Extracts activation id from invoke (action or trigger) or activation get
    */
-  def fqn(name: String)(implicit wp: WskProps) = {
-    val sep = "/" // Namespace.PATHSEP
-    if (name.startsWith(sep) || name.count(_ == sep(0)) == 2) name
-    else s"$sep${wp.namespace}$sep$name"
+  def extractActivationId(result: RunResult): Option[String] = {
+    Try {
+      // try to interpret the run result as the result of an invoke
+      extractActivationIdFromInvoke(result) getOrElse extractActivationIdFromActivation(result).get
+    } toOption
   }
 
   /**
-   * Resolves a namespace. If argument is defined, it takes precedence.
-   * else resolve to namespace in implicit WskProps.
-   *
-   * @param namespace an optional namespace
-   * @param wp whisk properties
-   * @return resolved namespace
+   * Extracts activation id from 'wsk activation get' run result
    */
-  def resolve(namespace: Option[String])(implicit wp: WskProps) = {
-    val sep = "/" // Namespace.PATHSEP
-    namespace getOrElse s"$sep${wp.namespace}"
+  private def extractActivationIdFromActivation(result: RunResult): Option[String] = {
+    Try {
+      // a characteristic string that comes right before the activationId
+      val idPrefix = "ok: got activation "
+      val output = if (result.exitCode != SUCCESS_EXIT) result.stderr else result.stdout
+      assert(output.contains(idPrefix), output)
+      extractActivationId(idPrefix, output).get
+    } toOption
+  }
+
+  /**
+   * Extracts activation id from 'wsk action invoke' or 'wsk trigger invoke'
+   */
+  private def extractActivationIdFromInvoke(result: RunResult): Option[String] = {
+    Try {
+      val output = if (result.exitCode != SUCCESS_EXIT) result.stderr else result.stdout
+      assert(output.contains("ok: invoked") || output.contains("ok: triggered"), output)
+      // a characteristic string that comes right before the activationId
+      val idPrefix = "with id "
+      extractActivationId(idPrefix, output).get
+    } toOption
+  }
+
+  /**
+   * Extracts activation id preceded by a prefix (idPrefix) from a string (output)
+   *
+   * @param idPrefix the prefix of the activation id
+   * @param output the string to be used in the extraction
+   * @return an option containing the id as a string or None if the extraction failed for any reason
+   */
+  private def extractActivationId(idPrefix: String, output: String): Option[String] = {
+    Try {
+      val start = output.indexOf(idPrefix) + idPrefix.length
+      var end = start
+      assert(start > 0)
+      while (end < output.length && output.charAt(end) != '\n') end = end + 1
+      output.substring(start, end) // a uuid
+    } toOption
   }
 }
 
-trait BaseListOrGetFromCollection extends FullyQualifiedNames {
+trait WskOperations {
+  val action: ActionOperations
+  val trigger: TriggerOperations
+  val rule: RuleOperations
+  val activation: ActivationOperations
+  val pkg: PackageOperations
+  val namespace: NamespaceOperations
+  val api: GatewayOperations
+
+  /**
+   * Utility function which strips the leading line if it ends in a newline (present when output is from
+   * wsk CLI) and parses the rest as a JSON object.
+   */
+  def parseJsonString(jsonStr: String): JsObject = WskOperations.parseJsonString(jsonStr)
+}
+
+object WskOperations {
+
+  /**
+   * Utility function which strips the leading line if it ends in a newline (present when output is from
+   * wsk CLI) and parses the rest as a JSON object.
+   */
+  def parseJsonString(jsonStr: String): JsObject = {
+    jsonStr.substring(jsonStr.indexOf("\n") + 1).parseJson.asJsObject // Skip optional status line before parsing
+  }
+}
+
+trait ListOrGetFromCollectionOperations {
 
   protected val noun: String
 
@@ -163,7 +202,7 @@ trait BaseListOrGetFromCollection extends FullyQualifiedNames {
           saveAs: Option[String] = None)(implicit wp: WskProps): RunResult
 }
 
-trait BaseDeleteFromCollection extends FullyQualifiedNames {
+trait DeleteFromCollectionOperations {
 
   protected val noun: String
 
@@ -185,7 +224,7 @@ trait BaseDeleteFromCollection extends FullyQualifiedNames {
   def sanitize(name: String)(implicit wp: WskProps): RunResult
 }
 
-trait BaseAction extends BaseRunWsk with BaseDeleteFromCollection with BaseListOrGetFromCollection {
+trait ActionOperations extends DeleteFromCollectionOperations with ListOrGetFromCollectionOperations {
 
   def create(name: String,
              artifact: Option[String],
@@ -213,7 +252,7 @@ trait BaseAction extends BaseRunWsk with BaseDeleteFromCollection with BaseListO
              expectedExitCode: Int = SUCCESS_EXIT)(implicit wp: WskProps): RunResult
 }
 
-trait BasePackage extends BaseRunWsk with BaseDeleteFromCollection with BaseListOrGetFromCollection {
+trait PackageOperations extends DeleteFromCollectionOperations with ListOrGetFromCollectionOperations {
 
   def create(name: String,
              parameters: Map[String, JsValue] = Map(),
@@ -231,7 +270,7 @@ trait BasePackage extends BaseRunWsk with BaseDeleteFromCollection with BaseList
            expectedExitCode: Int = SUCCESS_EXIT)(implicit wp: WskProps): RunResult
 }
 
-trait BaseTrigger extends BaseRunWsk with BaseDeleteFromCollection with BaseListOrGetFromCollection {
+trait TriggerOperations extends DeleteFromCollectionOperations with ListOrGetFromCollectionOperations {
 
   def create(name: String,
              parameters: Map[String, JsValue] = Map(),
@@ -249,7 +288,7 @@ trait BaseTrigger extends BaseRunWsk with BaseDeleteFromCollection with BaseList
            expectedExitCode: Int = SUCCESS_EXIT)(implicit wp: WskProps): RunResult
 }
 
-trait BaseRule extends BaseRunWsk with BaseDeleteFromCollection with BaseListOrGetFromCollection {
+trait RuleOperations extends DeleteFromCollectionOperations with ListOrGetFromCollectionOperations {
 
   def create(name: String,
              trigger: String,
@@ -266,7 +305,7 @@ trait BaseRule extends BaseRunWsk with BaseDeleteFromCollection with BaseListOrG
   def state(name: String, expectedExitCode: Int = SUCCESS_EXIT)(implicit wp: WskProps): RunResult
 }
 
-trait BaseActivation extends BaseRunWsk {
+trait ActivationOperations {
 
   def extractActivationId(result: RunResult): Option[String]
 
@@ -298,14 +337,14 @@ trait BaseActivation extends BaseRunWsk {
     implicit wp: WskProps): RunResult
 }
 
-trait BaseNamespace extends BaseRunWsk {
+trait NamespaceOperations {
 
   def list(expectedExitCode: Int = SUCCESS_EXIT, nameSort: Option[Boolean] = None)(implicit wp: WskProps): RunResult
 
   def whois()(implicit wskprops: WskProps): String
 }
 
-trait BaseApi extends BaseRunWsk {
+trait GatewayOperations {
 
   def create(basepath: Option[String] = None,
              relpath: Option[String] = None,
@@ -338,30 +377,4 @@ trait BaseApi extends BaseRunWsk {
              operation: Option[String] = None,
              expectedExitCode: Int = SUCCESS_EXIT,
              cliCfgFile: Option[String] = None)(implicit wp: WskProps): RunResult
-}
-
-trait BaseRunWsk extends Matchers {
-
-  // Takes a string and a list of sensitive strings. Any sensistive string found in
-  // the target string will be replaced with "XXXXX", returning the processed string
-  def hideStr(str: String, hideThese: Seq[String]): String = {
-    // Iterate through each string to hide, replacing it in the target string (str)
-    hideThese.fold(str)((updatedStr, replaceThis) => updatedStr.replace(replaceThis, "XXXXX"))
-  }
-
-  /*
-   * Utility function to return a JSON object from the CLI output that returns
-   * an optional a status line following by the JSON data
-   */
-  def parseJsonString(jsonStr: String): JsObject = {
-    jsonStr.substring(jsonStr.indexOf("\n") + 1).parseJson.asJsObject // Skip optional status line before parsing
-  }
-
-  def reportFailure(args: Buffer[String], ec: Integer, rr: RunResult) = {
-    val s = new StringBuilder()
-    s.append(args.mkString(" ") + "\n")
-    if (rr.stdout.nonEmpty) s.append(rr.stdout + "\n")
-    if (rr.stderr.nonEmpty) s.append(rr.stderr)
-    s.append("exit code:")
-  }
 }

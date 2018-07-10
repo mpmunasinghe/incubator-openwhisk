@@ -43,7 +43,7 @@ import whisk.core.entitlement._
 import whisk.core.entity._
 import whisk.core.entity.ActivationId.ActivationIdGenerator
 import whisk.core.entity.ExecManifest.Runtimes
-import whisk.core.loadBalancer.LoadBalancerProvider
+import whisk.core.loadBalancer.{Healthy, LoadBalancerProvider}
 import whisk.http.BasicHttpService
 import whisk.http.BasicRasService
 import whisk.spi.SpiLoader
@@ -134,25 +134,38 @@ class Controller(val instance: ControllerInstanceId,
   private val swagger = new SwaggerDocs(Uri.Path.Empty, "infoswagger.json")
 
   /**
-   * Handles GET /invokers URI.
+   * Handles GET /invokers
+   *             /invokers/healthy/count
    *
-   * @return JSON of invoker health
+   * @return JSON with details of invoker health or count of healthy invokers respectively.
    */
   private val internalInvokerHealth = {
     implicit val executionContext = actorSystem.dispatcher
-    (path("invokers") & get) {
-      complete {
-        loadBalancer
-          .invokerHealth()
-          .map(_.map {
-            case i => s"invoker${i.id.toInt}" -> i.status.asString
-          }.toMap.toJson.asJsObject)
+    (pathPrefix("invokers") & get) {
+      pathEndOrSingleSlash {
+        complete {
+          loadBalancer
+            .invokerHealth()
+            .map(_.map(i => s"invoker${i.id.toInt}" -> i.status.asString).toMap.toJson.asJsObject)
+        }
+      } ~ path("healthy" / "count") {
+        complete {
+          loadBalancer
+            .invokerHealth()
+            .map(_.count(_.status == Healthy).toJson)
+        }
       }
     }
   }
 
   // controller top level info
-  private val info = Controller.info(whiskConfig, runtimes, List(apiV1.basepath()))
+  private val info = Controller.info(
+    whiskConfig,
+    TimeLimit.config,
+    MemoryLimit.config,
+    LogLimit.config,
+    runtimes,
+    List(apiV1.basepath()))
 }
 
 /**
@@ -172,7 +185,12 @@ object Controller {
       SpiLoader.get[LoadBalancerProvider].requiredProperties ++
       EntitlementProvider.requiredProperties
 
-  private def info(config: WhiskConfig, runtimes: Runtimes, apis: List[String]) =
+  private def info(config: WhiskConfig,
+                   timeLimit: TimeLimitConfig,
+                   memLimit: MemoryLimitConfig,
+                   logLimit: MemoryLimitConfig,
+                   runtimes: Runtimes,
+                   apis: List[String]) =
     JsObject(
       "description" -> "OpenWhisk".toJson,
       "support" -> JsObject(
@@ -182,7 +200,14 @@ object Controller {
       "limits" -> JsObject(
         "actions_per_minute" -> config.actionInvokePerMinuteLimit.toInt.toJson,
         "triggers_per_minute" -> config.triggerFirePerMinuteLimit.toInt.toJson,
-        "concurrent_actions" -> config.actionInvokeConcurrentLimit.toInt.toJson),
+        "concurrent_actions" -> config.actionInvokeConcurrentLimit.toInt.toJson,
+        "sequence_length" -> config.actionSequenceLimit.toInt.toJson,
+        "min_action_duration" -> timeLimit.min.toMillis.toJson,
+        "max_action_duration" -> timeLimit.max.toMillis.toJson,
+        "min_action_memory" -> memLimit.min.toBytes.toJson,
+        "max_action_memory" -> memLimit.max.toBytes.toJson,
+        "min_action_logs" -> logLimit.min.toBytes.toJson,
+        "max_action_logs" -> logLimit.max.toBytes.toJson),
       "runtimes" -> runtimes.toJson)
 
   def main(args: Array[String]): Unit = {

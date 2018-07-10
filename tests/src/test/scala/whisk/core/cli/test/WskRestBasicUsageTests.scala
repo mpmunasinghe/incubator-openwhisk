@@ -36,7 +36,8 @@ import common.TestUtils._
 import common.WhiskProperties
 import common.WskProps
 import common.WskTestHelpers
-import common.rest.WskRest
+import common.WskActorSystem
+import common.rest.WskRestOperations
 import spray.json.DefaultJsonProtocol._
 import spray.json._
 import whisk.core.entity._
@@ -48,14 +49,14 @@ import whisk.http.Messages
  * Tests for basic CLI usage. Some of these tests require a deployed backend.
  */
 @RunWith(classOf[JUnitRunner])
-class WskRestBasicUsageTests extends TestHelpers with WskTestHelpers {
+class WskRestBasicUsageTests extends TestHelpers with WskTestHelpers with WskActorSystem {
 
-  implicit val wskprops: common.WskProps = WskProps()
-  val wsk: common.rest.WskRest = new WskRest
+  implicit val wskprops = WskProps()
+  val wsk = new WskRestOperations
   val defaultAction: Some[String] = Some(TestUtils.getTestActionFilename("hello.js"))
   val usrAgentHeaderRegEx: String = """\bUser-Agent\b": \[\s+"OpenWhisk\-CLI/1.\d+.*"""
 
-  behavior of "Wsk CLI usage"
+  behavior of "Wsk API basic usage"
 
   it should "allow a 3 part Fully Qualified Name (FQN) without a leading '/'" in withAssetCleaner(wskprops) {
     (wp, assetHelper) =>
@@ -106,17 +107,6 @@ class WskRestBasicUsageTests extends TestHelpers with WskTestHelpers {
           action.create(name, defaultAction, expectedExitCode = ec)
         }
     }
-  }
-
-  it should "reject action update for sequence with no components" in withAssetCleaner(wskprops) { (wp, assetHelper) =>
-    val name = "updateMissingComponents"
-    val file = Some(TestUtils.getTestActionFilename("hello.js"))
-    assetHelper.withCleaner(wsk.action, name) { (action, name) =>
-      action.create(name, file)
-    }
-    wsk.action
-      .create(name, None, update = true, kind = Some("sequence"), expectedExitCode = BadRequest.intValue)
-      .stderr should include("The request content was malformed:\n'components' must be defined for sequence kind")
   }
 
   it should "create, and get an action to verify parameter and annotation parsing" in withAssetCleaner(wskprops) {
@@ -241,7 +231,7 @@ class WskRestBasicUsageTests extends TestHelpers with WskTestHelpers {
         activation.end should be > Instant.EPOCH
         activation.response.status shouldBe ActivationResponse.messageForCode(ActivationResponse.Success)
         activation.response.success shouldBe true
-        activation.response.result shouldBe Some(JsObject())
+        activation.response.result shouldBe Some(JsObject.empty)
         activation.logs shouldBe Some(List())
         activation.annotations shouldBe defined
       }
@@ -279,29 +269,6 @@ class WskRestBasicUsageTests extends TestHelpers with WskTestHelpers {
         path.fields("value").convertTo[String] should fullyMatch regex (s""".*/$name""")
         annotations should contain(limitsObj)
       }
-  }
-
-  it should "report error when creating an action with unknown kind" in withAssetCleaner(wskprops) {
-    (wp, assetHelper) =>
-      val rr = assetHelper.withCleaner(wsk.action, "invalid kind", confirmDelete = false) { (action, name) =>
-        action.create(
-          name,
-          Some(TestUtils.getTestActionFilename("echo.js")),
-          kind = Some("foobar"),
-          expectedExitCode = BadRequest.intValue)
-      }
-      rr.stderr should include("kind 'foobar' not in Set")
-  }
-
-  it should "report error when creating an action with zip but without kind" in withAssetCleaner(wskprops) {
-    (wp, assetHelper) =>
-      val name = "zipWithNoKind"
-      val zippedPythonAction = Some(TestUtils.getTestActionFilename("python.zip"))
-      val createResult = assetHelper.withCleaner(wsk.action, name, confirmDelete = false) { (action, _) =>
-        action.create(name, zippedPythonAction, expectedExitCode = ANY_ERROR_EXIT)
-      }
-
-      createResult.stderr should include("kind '' not in Set")
   }
 
   it should "create, and invoke an action that utilizes an invalid docker container with appropriate error" in withAssetCleaner(
@@ -440,47 +407,6 @@ class WskRestBasicUsageTests extends TestHelpers with WskTestHelpers {
         JsObject("key" -> JsString("raw-http"), "value" -> JsBoolean(rawEnabled)),
         JsObject("key" -> JsString("final"), "value" -> JsBoolean(webEnabled || rawEnabled)))
     }
-  }
-
-  it should "ensure action update with --web flag only copies existing annotations when new annotations are not provided" in withAssetCleaner(
-    wskprops) { (wp, assetHelper) =>
-    val name = "webaction"
-    val file = Some(TestUtils.getTestActionFilename("echo.js"))
-    val createKey = "createKey"
-    val createValue = JsString("createValue")
-    val updateKey = "updateKey"
-    val updateValue = JsString("updateValue")
-    val origKey = "origKey"
-    val origValue = JsString("origValue")
-    val overwrittenValue = JsString("overwrittenValue")
-    val createAnnots = Map(createKey -> createValue, origKey -> origValue)
-    val updateAnnots = Map(updateKey -> updateValue, origKey -> overwrittenValue)
-
-    assetHelper.withCleaner(wsk.action, name) { (action, _) =>
-      action.create(name, file, annotations = createAnnots)
-    }
-
-    wsk.action.create(name, file, web = Some("true"), update = true)
-
-    val action = wsk.action.get(name)
-    action.getFieldJsValue("annotations") shouldBe JsArray(
-      JsObject("key" -> JsString("web-export"), "value" -> JsBoolean(true)),
-      JsObject("key" -> JsString(origKey), "value" -> origValue),
-      JsObject("key" -> JsString("raw-http"), "value" -> JsBoolean(false)),
-      JsObject("key" -> JsString("final"), "value" -> JsBoolean(true)),
-      JsObject("key" -> JsString(createKey), "value" -> createValue),
-      JsObject("key" -> JsString("exec"), "value" -> JsString("nodejs:6")))
-
-    wsk.action.create(name, file, web = Some("true"), update = true, annotations = updateAnnots)
-
-    val updatedAction = wsk.action.get(name)
-    updatedAction.getFieldJsValue("annotations") shouldBe JsArray(
-      JsObject("key" -> JsString("web-export"), "value" -> JsBoolean(true)),
-      JsObject("key" -> JsString(origKey), "value" -> overwrittenValue),
-      JsObject("key" -> JsString(updateKey), "value" -> updateValue),
-      JsObject("key" -> JsString("raw-http"), "value" -> JsBoolean(false)),
-      JsObject("key" -> JsString("final"), "value" -> JsBoolean(true)),
-      JsObject("key" -> JsString("exec"), "value" -> JsString("nodejs:6")))
   }
 
   it should "ensure action update creates an action with --web flag" in withAssetCleaner(wskprops) {
