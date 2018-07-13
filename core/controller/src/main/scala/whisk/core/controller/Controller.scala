@@ -119,7 +119,7 @@ class Controller(val instance: ControllerInstanceId,
   logging.info(this, s"loadbalancer initialized: ${loadBalancer.getClass.getSimpleName}")(TransactionId.controller)
 
   private implicit val entitlementProvider =
-    new LocalEntitlementProvider(whiskConfig, loadBalancer, instance)
+    SpiLoader.get[EntitlementSpiProvider].instance(whiskConfig, loadBalancer, instance)
   private implicit val activationIdFactory = new ActivationIdGenerator {}
   private implicit val logStore = SpiLoader.get[LogStoreProvider].logStore(actorSystem)
   private implicit val activationStore =
@@ -146,7 +146,7 @@ class Controller(val instance: ControllerInstanceId,
         complete {
           loadBalancer
             .invokerHealth()
-            .map(_.map(i => s"invoker${i.id.toInt}" -> i.status.asString).toMap.toJson.asJsObject)
+            .map(_.map(i => i.id.toString -> i.status.asString).toMap.toJson.asJsObject)
         }
       } ~ path("healthy" / "count") {
         complete {
