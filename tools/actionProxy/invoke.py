@@ -87,10 +87,12 @@ def parseArgs():
     return parser.parse_args()
 
 def init(args):
+    print args
     main = args.main
     artifact = args.artifact
 
-    if artifact and (args.binary or artifact.endswith('.zip') or artifact.endswith('tgz') or artifact.endswith('jar')):
+    if artifact and (args.binary or artifact.endswith('.zip') or artifact.endswith('tgz') or artifact.endswith('jar')\
+            or artifact.endswith('balx')):
         with open(artifact, 'rb') as fp:
             contents = fp.read()
         contents = base64.b64encode(contents)
